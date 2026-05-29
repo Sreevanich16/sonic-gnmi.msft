@@ -1,17 +1,7 @@
-# sonic-gnmi Azure Pipelines definition
-#
-# Stage layout:
-#   StaticChecks  - fast language-level checks (gofmt).
-#   Test          - unit, memory-leak, and integration tests + coverage gate.
-#   Package       - produce amd64 and arm64 .deb artifacts.
-#
-# Notes on naming (do not "fix"):
-#   * The job `build` inside stage `Test` is deliberately kept with both
-#     `job: build` and `displayName: "build"`. The pipeline decorator that
-#     publishes the diff-coverage GitHub check derives its name as
-#     `coverage.{BuildDefinitionName}.{Agent.JobName}`. `Agent.JobName`
-#     resolves to the job displayName, so changing either value would
-#     rename the required `coverage.sonic-net.sonic-gnmi.build` check.
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
 
 trigger:
   branches:
@@ -49,12 +39,12 @@ resources:
     ref: refs/heads/$(BUILD_BRANCH)
 
 stages:
-- stage: StaticChecks
-  displayName: "Static Checks"
+- stage: Build
   jobs:
-  - job: go_static_checks
-    displayName: "Go static checks"
-    timeoutInMinutes: 10
+  # Fast pure package testing - no SONiC dependencies needed
+  - job: PureCIJob
+    displayName: "Pure Package CI"
+    timeoutInMinutes: 15
 
     pool:
       vmImage: ubuntu-22.04
@@ -71,9 +61,12 @@ stages:
       clean: true
       displayName: 'Checkout sonic-mgmt-common'
 
-    - template: .azure/templates/install-go.yml
-      parameters:
-        version: $(GO_VERSION)
+    - script: |
+        wget https://go.dev/dl/go$(GO_VERSION).linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go$(GO_VERSION).linux-amd64.tar.gz
+        export PATH=$PATH:/usr/local/go/bin
+        go version
+      displayName: 'Install Go'
 
     - bash: |
         set -euo pipefail
@@ -81,17 +74,17 @@ stages:
         cd sonic-gnmi.msft
         go mod tidy
         make -f pure.mk junit-xml
-      displayName: 'Run pure package tests'
+      displayName: 'Run Pure Package Tests'
 
     - task: PublishTestResults@2
-      displayName: 'Publish pure package test results'
+      displayName: 'Publish Pure Package Test Results'
       condition: always()
       inputs:
         testResultsFormat: 'JUnit'
         testResultsFiles: '$(System.DefaultWorkingDirectory)/sonic-gnmi.msft/test-results/junit-pure.xml'
         failTaskOnFailedTests: true
         publishRunAttachments: true
-        testRunTitle: 'Pure package tests'
+        testRunTitle: 'Pure Package Tests'
 
     - task: PublishCodeCoverageResults@2
       displayName: 'Publish Pure Package Coverage'
@@ -105,14 +98,9 @@ stages:
       displayName: 'Publish pure coverage artifact'
       condition: always()
 
-    - publish: $(System.DefaultWorkingDirectory)/sonic-gnmi/test-results/coverage-pure.xml
-      artifact: coverage-pure
-      displayName: 'Publish pure coverage artifact'
-      condition: always()
-
   # Memory leak testing with address sanitizer
-  - job: memleak_tests
-    displayName: "Memory-leak tests"
+  - job: MemoryLeakJob
+    displayName: "Memory Leak Tests"
     timeoutInMinutes: 45
 
     pool:
@@ -129,7 +117,23 @@ stages:
       image: sonicdev-microsoft.azurecr.io:443/sonic-slave-trixie:latest
 
     steps:
-    - template: .azure/templates/setup-test-env.yml
+    - checkout: self
+      clean: true
+      submodules: recursive
+      displayName: 'Checkout code'
+
+    - checkout: sonic-mgmt-common
+      clean: true
+      submodules: recursive
+      displayName: 'Checkout sonic-mgmt-common'
+
+    - checkout: sonic-swss-common
+      clean: true
+      submodules: recursive
+      displayName: 'Checkout sonic-swss-common'
+
+    # Install SONiC dependencies using shared template
+    - template: .azure/templates/install-dependencies.yml
       parameters:
         buildBranch: $(BUILD_BRANCH)
         arch: amd64
@@ -145,18 +149,18 @@ stages:
       displayName: 'Run Memory Leak Tests'
 
     - task: PublishTestResults@2
-      displayName: 'Publish memory-leak test results'
+      displayName: 'Publish Memory Leak Test Results'
       condition: always()
       inputs:
         testResultsFormat: 'JUnit'
         testResultsFiles: '$(System.DefaultWorkingDirectory)/sonic-gnmi.msft/test-results/junit-memleak-standard.xml'
         failTaskOnFailedTests: true
         publishRunAttachments: true
-        testRunTitle: 'Memory-leak tests'
+        testRunTitle: 'Memory Leak Tests'
 
   # Full integration testing with SONiC dependencies
-  - job: integration_tests
-    displayName: "Integration tests"
+  - job: build
+    displayName: "build"
     timeoutInMinutes: 60
 
     pool:
@@ -223,7 +227,7 @@ stages:
       displayName: "Run Integration Tests"
 
     - task: PublishTestResults@2
-      displayName: 'Publish integration test results'
+      displayName: 'Publish Integration Test Results'
       condition: always()
       inputs:
         testResultsFormat: 'JUnit'
@@ -233,7 +237,7 @@ stages:
           $(System.DefaultWorkingDirectory)/sonic-gnmi.msft/test-results/junit-integration-dialout.xml
         failTaskOnFailedTests: true
         publishRunAttachments: true
-        testRunTitle: 'Integration tests'
+        testRunTitle: 'Integration Tests'
 
     - publish: $(Build.ArtifactStagingDirectory)/
       artifact: sonic-gnmi.msft
