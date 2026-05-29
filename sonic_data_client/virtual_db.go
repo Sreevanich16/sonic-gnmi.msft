@@ -78,12 +78,31 @@ var (
 	// SONiC Switch ID to Switch Stat packet integrity drop counters
 	countersDebugNameSwitchStatMap = make(map[string]string)
 
+	// sync.Once guards for each init function
+	initCountersPortNameMapOnce       sync.Once
+	initCountersQueueNameMapOnce      sync.Once
+	initCountersPGNameMapOnce         sync.Once
+	initCountersSidMapOnce            sync.Once
+	initCountersAclRuleMapOnce        sync.Once
+	initAliasMapOnce                  sync.Once
+	initCountersPfcwdNameMapOnce      sync.Once
+	initCountersFabricPortNameMapOnce sync.Once
+
+	// Mutex to protect ClearMappings from racing with init functions
+	clearMappingsMu sync.RWMutex
+
 	// path2TFuncTbl is used to populate trie tree which is reponsible
 	// for virtual path to real data path translation
 	pathTransFuncTbl = []pathTransFunc{
 		{ // stats for one or all Ethernet ports
 			path:      []string{"COUNTERS_DB", "COUNTERS", "Ethernet*"},
 			transFunc: v2rTranslate(v2rEthPortStats),
+		}, { // per-interface counters keyed by SONiC interface name
+			path:      []string{"COUNTERS_DB", "INTERFACE_COUNTERS"},
+			transFunc: v2rTranslate(v2rInterfaceCountersStats),
+		}, { // per-interface counters keyed by SONiC interface name
+			path:      []string{"COUNTERS_DB", "INTERFACE_COUNTERS"},
+			transFunc: v2rTranslate(v2rInterfaceCountersStats),
 		}, { // specific field stats for one or all Ethernet ports
 			path:      []string{"COUNTERS_DB", "COUNTERS", "Ethernet*", "*"},
 			transFunc: v2rTranslate(v2rEthPortFieldStats),
@@ -191,6 +210,7 @@ func initCountersPGNameMap() error {
 		}
 	})
 	return initErr
+<<<<<<< HEAD
 }
 
 func GetCountersQueueTypeMap() (map[string]string, error) {
@@ -218,6 +238,8 @@ func GetCountersQueueTypeMap() (map[string]string, error) {
 		}
 	}
 	return countersQueueTypeMap, nil
+=======
+>>>>>>> gnmi-master/master
 }
 
 func initCountersPortNameMap() error {
@@ -722,6 +744,33 @@ func v2rEthPortStats(paths []string) ([]tablePath, error) {
 	return tblPaths, nil
 }
 
+// v2rInterfaceCountersStats resolves the virtual path
+// [COUNTERS_DB INTERFACE_COUNTERS] to per-interface counter entries from the
+// underlying COUNTERS table, keyed by SONiC interface name (e.g. "Ethernet0").
+func v2rInterfaceCountersStats(paths []string) ([]tablePath, error) {
+	clearMappingsMu.RLock()
+	defer clearMappingsMu.RUnlock()
+	var tblPaths []tablePath
+	for port, oid := range countersPortNameMap {
+		namespace, ok := port2namespaceMap[port]
+		if !ok {
+			return nil, fmt.Errorf("%v does not have namespace associated", port)
+		}
+		separator, _ := GetTableKeySeparator(paths[DbIdx], namespace)
+		tblPath := tablePath{
+			dbNamespace:  namespace,
+			dbName:       paths[DbIdx],
+			tableName:    "COUNTERS", // INTERFACE_COUNTERS is virtual; data lives in COUNTERS
+			tableKey:     oid,
+			delimitor:    separator,
+			jsonTableKey: port,
+		}
+		tblPaths = append(tblPaths, tblPath)
+	}
+	log.V(6).Infof("v2rInterfaceCountersStats: %v", tblPaths)
+	return tblPaths, nil
+}
+
 // Supported cases:
 // <1> port name having suffix of "*" with specific field;
 //
@@ -1168,6 +1217,7 @@ func getPortNamespace(port string) (string, error) {
 	return namespace, nil
 }
 
+<<<<<<< HEAD
 func ClearMappings() {
 	value := os.Getenv("UNIT_TEST")
 	if value != "1" {
@@ -1200,6 +1250,8 @@ func ClearMappings() {
 	initCountersFabricPortNameMapOnce = sync.Once{}
 }
 
+=======
+>>>>>>> gnmi-master/master
 func AliasToPortNameMap() map[string]string {
 	// Ensure alias map is initialized
 	initAliasMap()
@@ -1274,6 +1326,7 @@ func v2rEthPortPGPeriodicWMs(paths []string) ([]tablePath, error) {
 	return tblPaths, nil
 }
 
+<<<<<<< HEAD
 // Populate real data paths from paths like
 // [COUNTERS_DB USER_WATERMARKS Ethernet* Queues],
 // [COUNTERS_DB PERSISTENT_WATERMARKS Ethernet* Queues],
@@ -1315,6 +1368,47 @@ func v2rEthPortQueueWMs(paths []string) ([]tablePath, error) {
 	return tblPaths, nil
 }
 
+=======
+func ClearMappings() {
+	value := os.Getenv("UNIT_TEST")
+	if value != "1" {
+		return
+	}
+	clearMappingsMu.Lock()
+	defer clearMappingsMu.Unlock()
+
+	counterMaps := []map[string]string{
+		countersPortNameMap,
+		alias2nameMap,
+		countersFabricPortNameMap,
+		countersQueueNameMap,
+		countersAclRuleMap,
+	}
+	for _, counterMap := range counterMaps {
+		for entry := range counterMap {
+			delete(counterMap, entry)
+		}
+	}
+
+	// Reset sync.Once guards so the next call re-initializes.
+	initCountersPortNameMapOnce = sync.Once{}
+	initCountersQueueNameMapOnce = sync.Once{}
+	initCountersPGNameMapOnce = sync.Once{}
+	initCountersSidMapOnce = sync.Once{}
+	initCountersAclRuleMapOnce = sync.Once{}
+	initAliasMapOnce = sync.Once{}
+	initCountersPfcwdNameMapOnce = sync.Once{}
+	initCountersFabricPortNameMapOnce = sync.Once{}
+}
+
+func InitCountersPortNameMap() error       { return initCountersPortNameMap() }
+func InitCountersQueueNameMap() error      { return initCountersQueueNameMap() }
+func InitCountersPGNameMap() error         { return initCountersPGNameMap() }
+func InitCountersSidMap() error            { return initCountersSidMap() }
+func InitCountersAclRuleMap() error        { return initCountersAclRuleMap() }
+func InitCountersFabricPortNameMap() error { return initCountersFabricPortNameMap() }
+
+>>>>>>> gnmi-master/master
 func lookupV2R(paths []string) ([]tablePath, error) {
 	n, ok := v2rTrie.Find(paths)
 	if ok {
