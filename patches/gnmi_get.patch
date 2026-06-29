@@ -17,7 +17,7 @@
  	pb "github.com/openconfig/gnmi/proto/gnmi"
  )
  
-@@ -63,16 +64,20 @@
+@@ -63,19 +64,25 @@
  	xPathFlags       arrayFlags
  	pbPathFlags      arrayFlags
  	pbModelDataFlags arrayFlags
@@ -28,6 +28,7 @@
  	timeOut          = flag.Duration("time_out", 10*time.Second, "Timeout for the Get request, 10 seconds by default")
  	encodingName     = flag.String("encoding", "JSON_IETF", "value encoding format to be used")
 +	jwtToken         = flag.String("jwt_token", "", "JWT Token if required")
++	maxRecvMsgSize   = flag.Int("max_recv_msg_size", 8*1024*1024, "Maximum receive message size in bytes")
  )
  
  func main() {
@@ -38,7 +39,11 @@
  	flag.Parse()
  
  	opts := credentials.ClientCredentials(*targetName)
-@@ -87,6 +92,10 @@
++	opts = append(opts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(*maxRecvMsgSize)))
+ 	conn, err := grpc.Dial(*targetAddr, opts...)
+ 	if err != nil {
+ 		log.Exitf("Dialing to %q failed: %v", *targetAddr, err)
+@@ -87,6 +94,10 @@
  	ctx, cancel := context.WithTimeout(context.Background(), *timeOut)
  	defer cancel()
  
@@ -49,7 +54,7 @@
  	encoding, ok := pb.Encoding_value[*encodingName]
  	if !ok {
  		var gnmiEncodingList []string
-@@ -96,12 +105,14 @@
+@@ -96,12 +107,14 @@
  		log.Exitf("Supported encodings: %s", strings.Join(gnmiEncodingList, ", "))
  	}
  
@@ -65,7 +70,7 @@
  		}
  		pbPathList = append(pbPathList, pbPath)
  	}
-@@ -120,6 +131,7 @@
+@@ -120,6 +133,7 @@
  	}
  
  	getRequest := &pb.GetRequest{
@@ -73,7 +78,7 @@
  		Encoding:  pb.Encoding(encoding),
  		Path:      pbPathList,
  		UseModels: pbModelDataList,
-@@ -135,4 +147,20 @@
+@@ -135,4 +149,20 @@
  
  	fmt.Println("== getResponse:")
  	utils.PrintProto(getResponse)
