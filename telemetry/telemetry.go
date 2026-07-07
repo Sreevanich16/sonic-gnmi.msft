@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -129,6 +130,17 @@ func runTelemetry(args []string) error {
 	return nil
 }
 
+// getEnvAsInt reads an environment variable and returns its integer value.
+// Falls back to defaultVal if the variable is unset or not a valid integer.
+func getEnvAsInt(envVar string, defaultVal int) int {
+	if val, ok := os.LookupEnv(envVar); ok {
+		if intVal, err := strconv.Atoi(val); err == nil {
+			return intVal
+		}
+	}
+	return defaultVal
+}
+
 func getGlogFlagsMap() map[string]bool {
 	// glog flags: https://pkg.go.dev/github.com/golang/glog
 	return map[string]bool{
@@ -206,8 +218,8 @@ func setupFlags(fs *flag.FlagSet) (*TelemetryConfig, *gnmi.Config, error) {
 		AuthPolicyEnabled:        fs.Bool("authz_policy_enabled", false, "Enable authz policy. Require insecure flag to be false."),
 		AuthzPolicyFile:          fs.String("authorization_policy_file", "/keys/authorization_policy.json", "Full path name of the JSON authorization policy file."),
 		EnableStreamMultiplexing: fs.Bool("enable_stream_multiplexing", false, "Allow multiple Subscribe RPCs on a single TCP connection via HTTP/2 stream multiplexing"),
-		MaxRecvMsgSize:           fs.Int("max_recv_msg_size", 4*1024*1024, "Maximum message size in bytes that the server can receive"),
-		MaxSendMsgSize:           fs.Int("max_send_msg_size", 4*1024*1024, "Maximum message size in bytes that the server can send"),
+		MaxRecvMsgSize:           fs.Int("max_recv_msg_size", getEnvAsInt("gRPC_MAX_RECEIVE_MSG_SIZE", 4*1024*1024), "Maximum message size in bytes that the server can receive"),
+		MaxSendMsgSize:           fs.Int("max_send_msg_size", getEnvAsInt("gRPC_MAX_SEND_MSG_SIZE", 4*1024*1024), "Maximum message size in bytes that the server can send"),
 	}
 
 	fs.Var(&telemetryCfg.UserAuth, "client_auth", "Client auth mode(s) - none,cert,password")
