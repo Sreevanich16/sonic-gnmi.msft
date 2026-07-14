@@ -1472,6 +1472,80 @@ func TestCertAuthDisabledWhenNoCaCert(t *testing.T) {
 	}
 }
 
+func TestMaxMsgSizeFromEnv(t *testing.T) {
+	originalArgs := os.Args
+	defer func() { os.Args = originalArgs }()
+
+	os.Setenv("gRPC_MAX_SEND_MSG_SIZE", "8388608")
+	os.Setenv("gRPC_MAX_RECEIVE_MSG_SIZE", "8388608")
+	defer os.Unsetenv("gRPC_MAX_SEND_MSG_SIZE")
+	defer os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
+
+	fs := flag.NewFlagSet("testMaxMsgEnv", flag.ContinueOnError)
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS"}
+
+	config, _, err := setupFlags(fs)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if *config.MaxSendMsgSize != 8388608 {
+		t.Errorf("Expected MaxSendMsgSize=8388608, got %d", *config.MaxSendMsgSize)
+	}
+	if *config.MaxRecvMsgSize != 8388608 {
+		t.Errorf("Expected MaxRecvMsgSize=8388608, got %d", *config.MaxRecvMsgSize)
+	}
+}
+
+func TestMaxMsgSizeDefault(t *testing.T) {
+	originalArgs := os.Args
+	defer func() { os.Args = originalArgs }()
+
+	os.Unsetenv("gRPC_MAX_SEND_MSG_SIZE")
+	os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
+
+	fs := flag.NewFlagSet("testMaxMsgDefault", flag.ContinueOnError)
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS"}
+
+	config, _, err := setupFlags(fs)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	expected := 4 * 1024 * 1024
+	if *config.MaxSendMsgSize != expected {
+		t.Errorf("Expected MaxSendMsgSize=%d, got %d", expected, *config.MaxSendMsgSize)
+	}
+	if *config.MaxRecvMsgSize != expected {
+		t.Errorf("Expected MaxRecvMsgSize=%d, got %d", expected, *config.MaxRecvMsgSize)
+	}
+}
+
+func TestMaxMsgSizeCliOverridesEnv(t *testing.T) {
+	originalArgs := os.Args
+	defer func() { os.Args = originalArgs }()
+
+	os.Setenv("gRPC_MAX_SEND_MSG_SIZE", "8388608")
+	os.Setenv("gRPC_MAX_RECEIVE_MSG_SIZE", "8388608")
+	defer os.Unsetenv("gRPC_MAX_SEND_MSG_SIZE")
+	defer os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
+
+	fs := flag.NewFlagSet("testMaxMsgCliOverride", flag.ContinueOnError)
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS", "-max_send_msg_size", "16777216", "-max_recv_msg_size", "16777216"}
+
+	config, _, err := setupFlags(fs)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	if *config.MaxSendMsgSize != 16777216 {
+		t.Errorf("Expected CLI override MaxSendMsgSize=16777216, got %d", *config.MaxSendMsgSize)
+	}
+	if *config.MaxRecvMsgSize != 16777216 {
+		t.Errorf("Expected CLI override MaxRecvMsgSize=16777216, got %d", *config.MaxRecvMsgSize)
+	}
+}
+
 func TestMain(m *testing.M) {
 	defer test_utils.MemLeakCheck()
 	m.Run()

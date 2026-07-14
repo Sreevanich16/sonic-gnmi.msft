@@ -1,14 +1,16 @@
 --- ./github.com/google/gnxi/gnmi_get/gnmi_get.go	2019-11-26 15:44:07.303598063 -0800
 +++ ./github.com/google/gnxi/gnmi_get/gnmi_get.go	2019-12-19 19:56:11.364223008 -0800
-@@ -21,6 +21,7 @@
+@@ -21,6 +21,9 @@
  	"fmt"
  	"strings"
  	"time"
 +	"io/ioutil"
++	"os"
++	"strconv"
  
  	log "github.com/golang/glog"
  	"github.com/golang/protobuf/proto"
-@@ -30,7 +31,7 @@
+@@ -30,7 +33,7 @@
  	"github.com/google/gnxi/utils"
  	"github.com/google/gnxi/utils/credentials"
  	"github.com/google/gnxi/utils/xpath"
@@ -17,7 +19,7 @@
  	pb "github.com/openconfig/gnmi/proto/gnmi"
  )
  
-@@ -63,16 +64,20 @@
+@@ -63,19 +66,36 @@
  	xPathFlags       arrayFlags
  	pbPathFlags      arrayFlags
  	pbModelDataFlags arrayFlags
@@ -28,8 +30,20 @@
  	timeOut          = flag.Duration("time_out", 10*time.Second, "Timeout for the Get request, 10 seconds by default")
  	encodingName     = flag.String("encoding", "JSON_IETF", "value encoding format to be used")
 +	jwtToken         = flag.String("jwt_token", "", "JWT Token if required")
++	maxRecvMsgSize   = flag.Int("max_recv_msg_size", getEnvAsInt("gRPC_MAX_RECEIVE_MSG_SIZE", 4*1024*1024), "Maximum receive message size in bytes")
  )
- 
+
++// getEnvAsInt reads an environment variable and returns its integer value.
++// Falls back to defaultVal if the variable is unset or not a valid integer.
++func getEnvAsInt(envVar string, defaultVal int) int {
++ 	if val, ok := os.LookupEnv(envVar); ok {
++ 		if intVal, err := strconv.Atoi(val); err == nil {
++ 			return intVal
++ 		}
++ 	}
++ 	return defaultVal
++}
++ 
  func main() {
  	flag.Var(&xPathFlags, "xpath", "xpath of the config node to be fetched")
  	flag.Var(&pbPathFlags, "pbpath", "protobuf format path of the config node to be fetched")
@@ -38,7 +52,11 @@
  	flag.Parse()
  
  	opts := credentials.ClientCredentials(*targetName)
-@@ -87,6 +92,10 @@
++	opts = append(opts, grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(*maxRecvMsgSize)))
+ 	conn, err := grpc.Dial(*targetAddr, opts...)
+ 	if err != nil {
+ 		log.Exitf("Dialing to %q failed: %v", *targetAddr, err)
+@@ -87,6 +108,10 @@
  	ctx, cancel := context.WithTimeout(context.Background(), *timeOut)
  	defer cancel()
  
@@ -49,7 +67,7 @@
  	encoding, ok := pb.Encoding_value[*encodingName]
  	if !ok {
  		var gnmiEncodingList []string
-@@ -96,12 +105,14 @@
+@@ -96,12 +121,14 @@
  		log.Exitf("Supported encodings: %s", strings.Join(gnmiEncodingList, ", "))
  	}
  
@@ -65,7 +83,7 @@
  		}
  		pbPathList = append(pbPathList, pbPath)
  	}
-@@ -120,6 +131,7 @@
+@@ -120,6 +133,7 @@
  	}
  
  	getRequest := &pb.GetRequest{
@@ -73,7 +91,7 @@
  		Encoding:  pb.Encoding(encoding),
  		Path:      pbPathList,
  		UseModels: pbModelDataList,
-@@ -135,4 +147,20 @@
+@@ -135,4 +149,20 @@
  
  	fmt.Println("== getResponse:")
  	utils.PrintProto(getResponse)
