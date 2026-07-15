@@ -1482,7 +1482,7 @@ func TestMaxMsgSizeFromEnv(t *testing.T) {
 	defer os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
 
 	fs := flag.NewFlagSet("testMaxMsgEnv", flag.ContinueOnError)
-	os.Args = []string{"cmd", "-port", "8080", "-noTLS"}
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS", "-bind_address", "127.0.0.1"}
 
 	config, _, err := setupFlags(fs)
 	if err != nil {
@@ -1505,7 +1505,7 @@ func TestMaxMsgSizeDefault(t *testing.T) {
 	os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
 
 	fs := flag.NewFlagSet("testMaxMsgDefault", flag.ContinueOnError)
-	os.Args = []string{"cmd", "-port", "8080", "-noTLS"}
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS", "-bind_address", "127.0.0.1"}
 
 	config, _, err := setupFlags(fs)
 	if err != nil {
@@ -1531,7 +1531,7 @@ func TestMaxMsgSizeCliOverridesEnv(t *testing.T) {
 	defer os.Unsetenv("gRPC_MAX_RECEIVE_MSG_SIZE")
 
 	fs := flag.NewFlagSet("testMaxMsgCliOverride", flag.ContinueOnError)
-	os.Args = []string{"cmd", "-port", "8080", "-noTLS", "-max_send_msg_size", "16777216", "-max_recv_msg_size", "16777216"}
+	os.Args = []string{"cmd", "-port", "8080", "-noTLS", "-bind_address", "127.0.0.1", "-max_send_msg_size", "16777216", "-max_recv_msg_size", "16777216"}
 
 	config, _, err := setupFlags(fs)
 	if err != nil {
