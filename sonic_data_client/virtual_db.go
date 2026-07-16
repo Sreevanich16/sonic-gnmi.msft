@@ -1291,6 +1291,8 @@ func ClearMappings() {
 		alias2nameMap,
 		countersFabricPortNameMap,
 		countersQueueNameMap,
+		countersVoQNameMap,
+		countersVoQOidNamespaceMap,
 		countersAclRuleMap,
 	}
 	for _, counterMap := range counterMaps {
