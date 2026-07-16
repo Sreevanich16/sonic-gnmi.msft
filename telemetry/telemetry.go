@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -65,6 +66,7 @@ type TelemetryConfig struct {
 	IdleConnDuration         *int
 	GnmiVrf                  *string
 	Vrf                      *string
+	BindAddress              *string
 	EnableCrl                *bool
 	CrlExpireDuration        *int
 	CaCertLnk                *string
@@ -202,6 +204,7 @@ func setupFlags(fs *flag.FlagSet) (*TelemetryConfig, *gnmi.Config, error) {
 		IdleConnDuration:         fs.Int("idle_conn_duration", 5, "Seconds before server closes idle connections"),
 		GnmiVrf:                  fs.String("gnmi_vrf", "", "VRF name for gNMI server binding."),
 		Vrf:                      fs.String("vrf", "", "VRF name for ZMQ client binding."),
+		BindAddress:              fs.String("bind_address", "", "Address to bind the gRPC TCP listener. Empty binds all interfaces. Use 127.0.0.1 to restrict to localhost."),
 		EnableCrl:                fs.Bool("enable_crl", false, "Enable certificate revocation list"),
 		CrlExpireDuration:        fs.Int("crl_expire_duration", 86400, "Certificate revocation list cache expire duration"),
 		ImgDirPath:               fs.String("img_dir", "/tmp/host_tmp", "Directory path where image will be transferred."),
@@ -261,6 +264,15 @@ func setupFlags(fs *flag.FlagSet) (*TelemetryConfig, *gnmi.Config, error) {
 		log.Infof("Log level must be greater than 0, setting to default value of 2")
 	}
 
+	if *telemetryCfg.NoTLS {
+		ip := net.ParseIP(*telemetryCfg.BindAddress)
+		if ip == nil || !ip.IsLoopback() {
+			return nil, nil, fmt.Errorf(
+				"--noTLS requires --bind_address to be a loopback address (e.g. 127.0.0.1 or ::1) " +
+					"to prevent cleartext gRPC exposure over the network")
+		}
+	}
+
 	if !*telemetryCfg.NoTLS && !*telemetryCfg.Insecure {
 		switch {
 		case *telemetryCfg.ServerCert == "":
@@ -285,6 +297,7 @@ func setupFlags(fs *flag.FlagSet) (*TelemetryConfig, *gnmi.Config, error) {
 	cfg.ConfigTableName = *telemetryCfg.ConfigTableName
 	cfg.GnmiVrf = *telemetryCfg.GnmiVrf
 	cfg.Vrf = *telemetryCfg.Vrf
+	cfg.BindAddress = *telemetryCfg.BindAddress
 	cfg.EnableCrl = *telemetryCfg.EnableCrl
 	cfg.CaCertLnk = *telemetryCfg.CaCertLnk
 	cfg.CaCertFile = *telemetryCfg.CaCert

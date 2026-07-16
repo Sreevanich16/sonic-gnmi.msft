@@ -66,7 +66,6 @@ import (
 	cacheclient "github.com/openconfig/gnmi/client"
 	gclient "github.com/openconfig/gnmi/client/gnmi"
 	gnmipb "github.com/openconfig/gnmi/proto/gnmi"
-	gnoi_file_pb "github.com/openconfig/gnoi/file"
 	gnoi_os_pb "github.com/openconfig/gnoi/os"
 	gnoi_system_pb "github.com/openconfig/gnoi/system"
 )
@@ -982,6 +981,48 @@ func initFullCountersDb(t *testing.T, namespace string) {
 	}
 	mpi_switch_counter := loadConfig(t, "COUNTERS:oid:0x21000000000000", countersSwitch_id_Byte)
 	loadDB(t, rclient, mpi_switch_counter)
+
+	// VoQ name map
+	fileName = "../testdata/COUNTERS_VOQ_NAME_MAP.txt"
+	countersVoQNameMapByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_voqname_map := loadConfig(t, "COUNTERS_VOQ_NAME_MAP", countersVoQNameMapByte)
+	loadDB(t, rclient, mpi_voqname_map)
+
+	// VoQ OID counters
+	fileName = "../testdata/COUNTERS:oid:0x160000000092a.txt"
+	countersVoQ92aByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000092a", countersVoQ92aByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091c.txt"
+	countersVoQ91cByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091c", countersVoQ91cByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091d.txt"
+	countersVoQ91dByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091d", countersVoQ91dByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091e.txt"
+	countersVoQ91eByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091e", countersVoQ91eByte)
+	loadDB(t, rclient, mpi_counter)
 }
 
 func prepareConfigDb(t *testing.T, namespace string) {
@@ -1265,6 +1306,48 @@ func prepareDb(t *testing.T, namespace string) {
 	}
 	sid2_counter := loadConfig(t, "COUNTERS:oid:0x54000000004f64", sid2_byte)
 	loadDB(t, rclient, sid2_counter)
+
+	// VoQ name map
+	fileName = "../testdata/COUNTERS_VOQ_NAME_MAP.txt"
+	countersVoQNameMapByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_voqname_map := loadConfig(t, "COUNTERS_VOQ_NAME_MAP", countersVoQNameMapByte)
+	loadDB(t, rclient, mpi_voqname_map)
+
+	// VoQ OID counters
+	fileName = "../testdata/COUNTERS:oid:0x160000000092a.txt"
+	countersVoQ92aByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000092a", countersVoQ92aByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091c.txt"
+	countersVoQ91cByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091c", countersVoQ91cByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091d.txt"
+	countersVoQ91dByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091d", countersVoQ91dByte)
+	loadDB(t, rclient, mpi_counter)
+
+	fileName = "../testdata/COUNTERS:oid:0x160000000091e.txt"
+	countersVoQ91eByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	mpi_counter = loadConfig(t, "COUNTERS:oid:0x160000000091e", countersVoQ91eByte)
+	loadDB(t, rclient, mpi_counter)
 
 	// Load CONFIG_DB for alias translation
 	prepareConfigDb(t, namespace)
@@ -2552,6 +2635,32 @@ func runTestSubscribe(t *testing.T, namespace string) {
 	countersPortNameMapJsonUpdate := tmp.(map[string]interface{})
 	countersPortNameMapJsonUpdate["test_field"] = "test_value"
 
+	// VoQ test data
+	fileName = "../testdata/COUNTERS:SwitchName_star.txt"
+	countersSwitchNameWildVoQsByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	var countersSwitchNameWildVoQsJson interface{}
+	json.Unmarshal(countersSwitchNameWildVoQsByte, &countersSwitchNameWildVoQsJson)
+
+	fileName = "../testdata/COUNTERS:SwitchName_single.txt"
+	countersSwitchNameVoQsByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	var countersSwitchNameVoQsJson interface{}
+	json.Unmarshal(countersSwitchNameVoQsByte, &countersSwitchNameVoQsJson)
+
+	fileName = "../testdata/COUNTERS:SwitchName_sysport.txt"
+	countersSystemPortVoQsByte, err := ioutil.ReadFile(fileName)
+	if err != nil {
+		t.Fatalf("read file %v err: %v", fileName, err)
+	}
+	var countersSystemPortVoQsJson interface{}
+	json.Unmarshal(countersSystemPortVoQsByte, &countersSystemPortVoQsJson)
+	// end of VoQ test data
+
 	// for table key subscription
 	fileName = "../testdata/COUNTERS:Ethernet68.txt"
 	countersEthernet68Byte, err := ioutil.ReadFile(fileName)
@@ -3532,6 +3641,57 @@ func runTestSubscribe(t *testing.T, namespace string) {
 			},
 		},
 		{
+			desc: "poll query for COUNTERS/SwitchName*/VoQs",
+			poll: 1,
+			q: client.Query{
+				Target:  "COUNTERS_DB",
+				Type:    client.Poll,
+				Queries: []client.Path{{"COUNTERS", "SwitchName*", "VoQs"}},
+				TLS:     &tls.Config{InsecureSkipVerify: true},
+			},
+			wantNoti: []client.Notification{
+				client.Connected{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "SwitchName*", "VoQs"}, TS: time.Unix(0, 200), Val: countersSwitchNameWildVoQsJson},
+				client.Sync{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "SwitchName*", "VoQs"}, TS: time.Unix(0, 200), Val: countersSwitchNameWildVoQsJson},
+				client.Sync{},
+			},
+		},
+		{
+			desc: "poll query for COUNTERS/str2-7804-lc7-1/VoQs",
+			poll: 1,
+			q: client.Query{
+				Target:  "COUNTERS_DB",
+				Type:    client.Poll,
+				Queries: []client.Path{{"COUNTERS", "str2-7804-lc7-1", "VoQs"}},
+				TLS:     &tls.Config{InsecureSkipVerify: true},
+			},
+			wantNoti: []client.Notification{
+				client.Connected{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "str2-7804-lc7-1", "VoQs"}, TS: time.Unix(0, 200), Val: countersSwitchNameVoQsJson},
+				client.Sync{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "str2-7804-lc7-1", "VoQs"}, TS: time.Unix(0, 200), Val: countersSwitchNameVoQsJson},
+				client.Sync{},
+			},
+		},
+		{
+			desc: "poll query for COUNTERS/str2-7804-lc7-1|Asic0|Ethernet68/VoQs",
+			poll: 1,
+			q: client.Query{
+				Target:  "COUNTERS_DB",
+				Type:    client.Poll,
+				Queries: []client.Path{{"COUNTERS", "str2-7804-lc7-1|Asic0|Ethernet68", "VoQs"}},
+				TLS:     &tls.Config{InsecureSkipVerify: true},
+			},
+			wantNoti: []client.Notification{
+				client.Connected{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "str2-7804-lc7-1|Asic0|Ethernet68", "VoQs"}, TS: time.Unix(0, 200), Val: countersSystemPortVoQsJson},
+				client.Sync{},
+				client.Update{Path: []string{"COUNTERS_DB", "COUNTERS", "str2-7804-lc7-1|Asic0|Ethernet68", "VoQs"}, TS: time.Unix(0, 200), Val: countersSystemPortVoQsJson},
+				client.Sync{},
+			},
+		},
+		{
 			desc: "poll query for COUNTERS/Ethernet68/Queues with field value change",
 			poll: 3,
 			q: client.Query{
@@ -4290,75 +4450,9 @@ func TestGNOI(t *testing.T) {
 		}
 	})
 
-	t.Run("FileStatSuccess", func(t *testing.T) {
-		mockClient := &ssc.DbusClient{}
-		expectedResult := map[string]string{
-			"last_modified": "1609459200000000000",
-			"permissions":   "644",
-			"size":          "1024",
-			"umask":         "o022",
-		}
-		mock := gomonkey.ApplyMethod(reflect.TypeOf(mockClient), "GetFileStat", func(_ *ssc.DbusClient, path string) (map[string]string, error) {
-			return expectedResult, nil
-		})
-		defer mock.Reset()
-
-		// Prepare context and request
-		ctx := context.Background()
-		req := &gnoi_file_pb.StatRequest{Path: "/etc/sonic/config_db.json"}
-		fc := gnoi_file_pb.NewFileClient(conn)
-
-		resp, err := fc.Stat(ctx, req)
-		if err != nil {
-			t.Fatalf("FileStat failed: %v", err)
-		}
-		// Validate the response
-		if len(resp.Stats) == 0 {
-			t.Fatalf("Expected at least one StatInfo in response")
-		}
-
-		statInfo := resp.Stats[0]
-
-		if statInfo.LastModified != 1609459200000000000 {
-			t.Errorf("Expected last_modified %d but got %d", 1609459200000000000, statInfo.LastModified)
-		}
-		if statInfo.Permissions != 420 {
-			t.Errorf("Expected permissions 420 but got %d", statInfo.Permissions)
-		}
-		if statInfo.Size != 1024 {
-			t.Errorf("Expected size 1024 but got %d", statInfo.Size)
-		}
-		if statInfo.Umask != 18 {
-			t.Errorf("Expected umask 18 but got %d", statInfo.Umask)
-		}
-	})
-
-	t.Run("FileStatFailure", func(t *testing.T) {
-		mockClient := &ssc.DbusClient{}
-		expectedError := fmt.Errorf("failed to get file stats")
-
-		mock := gomonkey.ApplyMethod(reflect.TypeOf(mockClient), "GetFileStat", func(_ *ssc.DbusClient, path string) (map[string]string, error) {
-			return nil, expectedError
-		})
-		defer mock.Reset()
-
-		// Prepare context and request
-		ctx := context.Background()
-		req := &gnoi_file_pb.StatRequest{Path: "/etc/sonic/config_db.json"}
-		fc := gnoi_file_pb.NewFileClient(conn)
-
-		resp, err := fc.Stat(ctx, req)
-		if err == nil {
-			t.Fatalf("Expected error but got none")
-		}
-		if resp != nil {
-			t.Fatalf("Expected nil response but got: %v", resp)
-		}
-
-		if !strings.Contains(err.Error(), expectedError.Error()) {
-			t.Errorf("Expected error to contain '%v' but got '%v'", expectedError, err)
-		}
-	})
+	// Stat behavior is covered by pkg/gnoi/file/stat_test.go; the
+	// gnmi_server-level wiring (auth + delegation) is covered by
+	// TestGnoiFile in gnoi_file_test.go. No FileStat sub-test here.
 
 	t.Run("OSVerifySuccess", func(t *testing.T) {
 		mockClient := &ssc.DbusClient{}

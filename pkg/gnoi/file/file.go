@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,13 +32,39 @@ const (
 	// Maximum time allowed for downloading a file (5 minutes for large firmware images)
 	downloadTimeout = 5 * time.Minute
 
-	// Maximum file size allowed (4GB - typical maximum firmware size)
-	maxFileSize = 4 * 1024 * 1024 * 1024 // 4GB in bytes
+	// defaultMaxFileSize is the default cap for File.Get / File.Put / TransferToRemote
+	// (4 GiB — typical maximum firmware size). Exposed as a var below so tests can
+	// lower it without producing actual 4 GiB files.
+	defaultMaxFileSize = 4 * 1024 * 1024 * 1024
 )
+
+// hostRoot is the path prefix that maps the *container* view onto the *host*
+// filesystem. In production it is "/mnt/host" (the bind mount the gnmi
+// container ships with). Tests set it to a t.TempDir() so they can build real
+// fixtures (regular files, fifos, oversize sparse files, broken perms, ...)
+// without touching the actual /mnt/host on the test machine.
+//
+// translatePathForContainer is the only consumer; it prepends hostRoot to the
+// caller-supplied logical path when hostRoot exists on disk.
+var hostRoot = "/mnt/host"
+
+// maxFileSize is the per-RPC size cap. var (not const) so tests can lower it
+// to exercise the over-size branch without producing 4 GiB files.
+var maxFileSize int64 = defaultMaxFileSize
 
 // newFileClient wraps gnoi_file_pb.NewFileClient to allow test patching
 // (the generated function is tiny and gets inlined, defeating gomonkey).
 var newFileClient = gnoi_file_pb.NewFileClient
+
+// fsStat / fsReadDir are package-level seams over os.Stat and os.ReadDir.
+// Tests override them to exercise error branches that the root-on-tmpfs
+// test environment can't otherwise reach: permission-denied (root bypasses
+// DAC) and TOCTOU races (path removed between Stat and ReadDir). Production
+// callers go through os.* unchanged.
+var (
+	fsStat    = os.Stat
+	fsReadDir = os.ReadDir
+)
 
 // HandleTransferToRemote implements the complete logic for the TransferToRemote RPC.
 // It validates the request, checks for DPU metadata, and routes accordingly.
@@ -160,9 +187,10 @@ func translatePathForContainer(path string) string {
 	// Clean the path first
 	cleanPath := filepath.Clean(path)
 
-	// Check if /mnt/host exists (indicates we're running in a container)
-	if _, err := os.Stat("/mnt/host"); err == nil {
-		return "/mnt/host" + cleanPath
+	// hostRoot exists on disk → we're running in a container with the host
+	// filesystem bind-mounted (or in a test that injected a fake root).
+	if _, err := os.Stat(hostRoot); err == nil {
+		return hostRoot + cleanPath
 	}
 
 	// Not in container, return original path
@@ -568,4 +596,248 @@ func HandleFileRemove(ctx context.Context, req *gnoi_file_pb.RemoveRequest) (*gn
 
 	log.Infof("Successfully removed file: %s", remoteFile)
 	return &gnoi_file_pb.RemoveResponse{}, nil
+}
+
+// defaultUmask is the assumed process file-creation mask reported in StatInfo.
+//
+// gNOI's StatInfo.umask is "Default file creation mask" — a process-level
+// attribute, not a per-file one. We can't query it per-file via os.Stat, and
+// reading the running process's umask via syscall.Umask is racy (it both gets
+// AND sets in a single call, briefly clobbering the real value for any
+// concurrent goroutine that creates files). SONiC services run with the
+// distro default of 0022, so report that.
+const defaultUmask = 0022
+
+// statInfoFromFileInfo builds a StatInfo for `info` at absolute path `reportPath`.
+//
+// `reportPath` is the path as the client should see it (i.e. with any
+// /mnt/host container-translation prefix already stripped) — gNOI clients
+// expect the StatInfo.path to round-trip the host-side path they asked for.
+//
+// Permissions field follows the gNOI proto: octal mode formatted as decimal
+// digits. e.g. mode 0755 → 755 (not 493).
+func statInfoFromFileInfo(reportPath string, info os.FileInfo) (*gnoi_file_pb.StatInfo, error) {
+	permsOctalStr := strconv.FormatUint(uint64(info.Mode().Perm()), 8)
+	perms, err := strconv.ParseUint(permsOctalStr, 10, 32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode permissions for %s: %v", reportPath, err)
+	}
+
+	var size uint64
+	if !info.IsDir() {
+		// Reporting fs-block size for a directory is not portable and
+		// gNOI consumers don't rely on it. Leave size=0 for dirs.
+		if s := info.Size(); s > 0 {
+			size = uint64(s)
+		}
+	}
+
+	return &gnoi_file_pb.StatInfo{
+		Path:         reportPath,
+		LastModified: uint64(info.ModTime().UnixNano()),
+		Permissions:  uint32(perms),
+		Size:         size,
+		Umask:        defaultUmask,
+	}, nil
+}
+
+// HandleStat implements gNOI File.Stat using direct host-filesystem access
+// via the /mnt/host bind mount, replacing the legacy DBus host-service path.
+//
+// Per the gNOI proto: "Stat will list files at the provided path." So:
+//   - If the path is a regular file, return one StatInfo for it.
+//   - If the path is a directory, return one StatInfo for each immediate
+//     child (non-recursive), matching the documented "list" semantics.
+//     The directory itself is intentionally not included; clients that want
+//     metadata about the directory can stat its parent.
+//
+// The path field in each StatInfo is the host-visible path (the /mnt/host
+// container prefix is stripped on output) so clients see paths consistent
+// with what they requested.
+func HandleStat(ctx context.Context, req *gnoi_file_pb.StatRequest) (*gnoi_file_pb.StatResponse, error) {
+	if req == nil {
+		return nil, status.Error(codes.InvalidArgument, "request cannot be nil")
+	}
+
+	reqPath := req.GetPath()
+	if reqPath == "" {
+		return nil, status.Error(codes.InvalidArgument, "path cannot be empty")
+	}
+	if !filepath.IsAbs(reqPath) {
+		return nil, status.Errorf(codes.InvalidArgument, "path must be absolute, got: %s", reqPath)
+	}
+
+	cleanReqPath := filepath.Clean(reqPath)
+	// Reject /mnt/host-prefixed inputs to avoid double-prefixing in
+	// translatePathForContainer (e.g. "/mnt/host/tmp/x" → "/mnt/host/mnt/host/tmp/x").
+	// Clients should pass host-visible paths like /tmp/..., /etc/..., /host/...
+	if cleanReqPath == "/mnt/host" || strings.HasPrefix(cleanReqPath, "/mnt/host/") {
+		return nil, status.Errorf(codes.InvalidArgument,
+			"path must be host-visible, not container-internal: %s (drop the /mnt/host prefix)", reqPath)
+	}
+	translatedPath := translatePathForContainer(cleanReqPath)
+
+	info, err := fsStat(translatedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, status.Errorf(codes.NotFound, "path not found: %s", reqPath)
+		}
+		if os.IsPermission(err) {
+			return nil, status.Errorf(codes.PermissionDenied, "permission denied: %s", reqPath)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to stat %s: %v", reqPath, err)
+	}
+
+	resp := &gnoi_file_pb.StatResponse{}
+
+	if !info.IsDir() {
+		statInfo, err := statInfoFromFileInfo(cleanReqPath, info)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "%v", err)
+		}
+		resp.Stats = []*gnoi_file_pb.StatInfo{statInfo}
+		return resp, nil
+	}
+
+	// Directory: list immediate children (non-recursive).
+	entries, err := fsReadDir(translatedPath)
+	if err != nil {
+		// The directory may have been removed between the os.Stat above
+		// and this ReadDir; surface that as NotFound, not Internal, so
+		// transient races don't look like server errors.
+		if os.IsNotExist(err) {
+			return nil, status.Errorf(codes.NotFound, "path not found: %s", reqPath)
+		}
+		if os.IsPermission(err) {
+			return nil, status.Errorf(codes.PermissionDenied, "permission denied reading directory: %s", reqPath)
+		}
+		return nil, status.Errorf(codes.Internal, "failed to read directory %s: %v", reqPath, err)
+	}
+
+	stats := make([]*gnoi_file_pb.StatInfo, 0, len(entries))
+	for _, entry := range entries {
+		entryInfo, err := entry.Info()
+		if err != nil {
+			// Entry vanished between ReadDir and Info (race): skip it
+			// rather than failing the whole listing.
+			log.Warningf("HandleStat: skipping %s/%s: %v", reqPath, entry.Name(), err)
+			continue
+		}
+		childReportPath := filepath.Join(cleanReqPath, entry.Name())
+		statInfo, err := statInfoFromFileInfo(childReportPath, entryInfo)
+		if err != nil {
+			log.Warningf("HandleStat: skipping %s: %v", childReportPath, err)
+			continue
+		}
+		stats = append(stats, statInfo)
+	}
+	resp.Stats = stats
+	return resp, nil
+}
+
+// HandleGet implements the complete logic for the gNOI File.Get RPC.
+//
+// Per the gNOI proto: "Get reads and streams the contents of a file from
+// the target. The file is streamed by sequential messages, each
+// containing up to 64KB of data. A final message is sent prior to
+// closing the stream that contains the hash of the data sent."
+//
+// Behavior:
+//   - Validates the request: non-nil, non-empty absolute path, and not
+//     prefixed with /mnt/host (clients pass host-visible paths).
+//   - Translates the path through translatePathForContainer so it works
+//     both inside the gnmi container and on a bare host.
+//   - Rejects directories with FailedPrecondition (the proto requires
+//     a file).
+//   - Streams the file in 64 KiB chunks while updating a running MD5,
+//     then sends a final HashType message. MD5 matches the convention
+//     used by HandlePut and HandleTransferToRemote in this package; it
+//     is integrity-only, not security-critical.
+func HandleGet(req *gnoi_file_pb.GetRequest, stream gnoi_file_pb.File_GetServer) error {
+	if req == nil {
+		return status.Error(codes.InvalidArgument, "request cannot be nil")
+	}
+	remoteFile := req.GetRemoteFile()
+	if remoteFile == "" {
+		return status.Error(codes.InvalidArgument, "remote_file cannot be empty")
+	}
+	if !filepath.IsAbs(remoteFile) {
+		return status.Errorf(codes.InvalidArgument, "remote_file must be absolute, got: %s", remoteFile)
+	}
+
+	cleanPath := filepath.Clean(remoteFile)
+	if cleanPath == "/mnt/host" || strings.HasPrefix(cleanPath, "/mnt/host/") {
+		return status.Errorf(codes.InvalidArgument,
+			"remote_file must be host-visible, not container-internal: %s (drop the /mnt/host prefix)", remoteFile)
+	}
+
+	translatedPath := translatePathForContainer(cleanPath)
+
+	info, err := os.Stat(translatedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return status.Errorf(codes.NotFound, "file not found: %s", remoteFile)
+		}
+		if os.IsPermission(err) {
+			return status.Errorf(codes.PermissionDenied, "permission denied: %s", remoteFile)
+		}
+		return status.Errorf(codes.Internal, "failed to stat %s: %v", remoteFile, err)
+	}
+	if info.IsDir() {
+		return status.Errorf(codes.FailedPrecondition, "remote_file is a directory: %s", remoteFile)
+	}
+	if !info.Mode().IsRegular() {
+		return status.Errorf(codes.FailedPrecondition, "remote_file is not a regular file: %s", remoteFile)
+	}
+	if info.Size() > maxFileSize {
+		return status.Errorf(codes.FailedPrecondition, "file %s exceeds maximum size of %d bytes", remoteFile, maxFileSize)
+	}
+
+	f, err := os.Open(translatedPath)
+	if err != nil {
+		if os.IsPermission(err) {
+			return status.Errorf(codes.PermissionDenied, "permission denied opening %s: %v", remoteFile, err)
+		}
+		return status.Errorf(codes.Internal, "failed to open %s: %v", remoteFile, err)
+	}
+	defer f.Close()
+
+	hashCalc := hash.NewStreamingMD5Calculator()
+	buf := make([]byte, 64*1024) // 64 KiB chunks per gNOI proto.
+	for {
+		if err := stream.Context().Err(); err != nil {
+			return status.FromContextError(err).Err()
+		}
+		n, readErr := f.Read(buf)
+		if n > 0 {
+			chunk := buf[:n]
+			if _, werr := hashCalc.Write(chunk); werr != nil {
+				return status.Errorf(codes.Internal, "hash update failed: %v", werr)
+			}
+			if serr := stream.Send(&gnoi_file_pb.GetResponse{
+				Response: &gnoi_file_pb.GetResponse_Contents{Contents: chunk},
+			}); serr != nil {
+				return status.Errorf(codes.Internal, "failed to send chunk: %v", serr)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return status.Errorf(codes.Internal, "failed to read %s: %v", remoteFile, readErr)
+		}
+	}
+
+	if err := stream.Send(&gnoi_file_pb.GetResponse{
+		Response: &gnoi_file_pb.GetResponse_Hash{
+			Hash: &types.HashType{
+				Method: types.HashType_MD5,
+				Hash:   hashCalc.Sum(),
+			},
+		},
+	}); err != nil {
+		return status.Errorf(codes.Internal, "failed to send hash: %v", err)
+	}
+	log.Infof("Successfully streamed %d bytes from %s", info.Size(), remoteFile)
+	return nil
 }
